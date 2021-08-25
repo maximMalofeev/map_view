@@ -4,8 +4,12 @@ import QtQuick.Controls 2.15
 ApplicationWindow {
   id: root
 
-  property int currentMapLayer: zoomSlider.value
+  property int currentMapLayer: 10
   property var mapLayers: ({})
+
+  onCurrentMapLayerChanged: {
+    updateMap()
+  }
 
   function setLayerItem(i, l, x, y) {
     if (!mapLayers[l]) {
@@ -26,26 +30,57 @@ ApplicationWindow {
     return false
   }
 
-  function updateMap() {
+  function updateMap(initialCenter) {
+    let center = initialCenter ? initialCenter : Qt.point((flickable.contentX + flickable.width / 2) / background.width, (flickable.contentY + flickable.height / 2) / background.height)
+    let sideLen = Math.pow(2, currentMapLayer) * Math.max(root.width, root.height)
+    let contentX = Math.max(center.x * sideLen - flickable.width / 2, 0)
+    let contentY = Math.max(center.y * sideLen - flickable.height / 2, 0)
+
+    flickable.contentX = contentX
+    flickable.contentY = contentY
+    background.width = sideLen
+    background.height = sideLen
+
     let count = Math.pow(2, currentMapLayer)
-    let firstXTile = Math.floor(flickable.contentX / (background.width / count))
-    let lastXTile = Math.ceil((flickable.contentX + flickable.width) / (background.width / count))
-    let firstYTile = Math.floor(flickable.contentY / (background.height / count))
-    let lastYTile = Math.ceil((flickable.contentY + flickable.height) / (background.height / count))
+    let firstXTile = Math.floor(contentX / (sideLen / count))
+    let lastXTile = Math.ceil((contentX + flickable.width) / (sideLen / count))
+    let firstYTile = Math.floor(contentY / (sideLen / count))
+    let lastYTile = Math.ceil((contentY + flickable.height) / (sideLen / count))
     for (let i = firstXTile; i < lastXTile; i++) {
       for (let j = firstYTile; j < lastYTile; j++) {
         if (hasLayerItem(currentMapLayer, i, j)) {
           continue
         }
 
-        let tile = tileComponent.createObject(background, {
-                                                mapLayer: currentMapLayer,
-                                                xPos: i,
-                                                yPos: j,
-                                              })
+        let tile = tileComponent.createObject(background, { mapLayer: currentMapLayer, xPos: i, yPos: j })
         setLayerItem(tile, currentMapLayer, i, j)
       }
     }
+
+    clearCache()
+  }
+
+  function clearCache() {
+    Object.keys(mapLayers).forEach(function(l) {
+      l = Number(l)
+      if (l !== currentMapLayer && l !== (currentMapLayer - 1) && l !== (currentMapLayer + 1) && l !== 0) {
+        Object.keys(mapLayers[l]).forEach(function(x) {
+          Object.keys(mapLayers[l][x]).forEach(function(y) {
+            mapLayers[l][x][y].destroy()
+            delete mapLayers[l][x][y]
+          })
+          delete mapLayers[l][x]
+        })
+        delete mapLayers[l]
+      }
+    })
+  }
+
+  function lon2relCoord(lon) {
+    return (lon + 180) / 360
+  }
+  function lat2relCoord(lat) {
+    return (1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2
   }
 
   width: 800
@@ -85,29 +120,19 @@ ApplicationWindow {
     }
   }
 
-  Slider {
+  SpinBox {
     id: zoomSlider
     anchors.bottom: parent.bottom
-    anchors.left: parent.left
-    anchors.right: parent.right
+    anchors.horizontalCenter: parent.horizontalCenter
     anchors.margins: 5
     from: 0
     to: 100
     stepSize: 1
+    value: root.currentMapLayer
+    editable: true
 
     onValueChanged: {
-      if (value != root.currentMapLayer) {
-        root.currentMapLayer = value
-        let center = Qt.point((flickable.contentX + flickable.width / 2) / background.width, (flickable.contentY + flickable.height / 2) / background.height)
-        let newSideLen = Math.pow(2, value) * Math.max(root.width, root.height)
-
-        flickable.contentX = center.x * newSideLen - flickable.width / 2
-        flickable.contentY = center.y * newSideLen - flickable.height / 2
-        background.width = newSideLen
-        background.height = newSideLen
-
-        updateMap()
-      }
+      root.currentMapLayer = value
     }
   }
 
@@ -115,6 +140,7 @@ ApplicationWindow {
     id: tileComponent
 
     Image {
+      id: tile
       property int mapLayer
       property int xPos
       property int yPos
@@ -127,6 +153,7 @@ ApplicationWindow {
       z: mapLayer
       opacity: (mapLayer <= root.currentMapLayer && progress === 1.0) ? 1.0 : 0.0
       source: "http://a.tile.stamen.com/toner/%1/%2/%3.png".arg(mapLayer).arg(xPos).arg(yPos)
+//      source: "http://172.21.100.146:8008/%1/%2/%3.png".arg(mapLayer).arg(xPos).arg(yPos)
 
       Behavior on opacity {
         NumberAnimation { duration: 500 }
@@ -135,7 +162,8 @@ ApplicationWindow {
   }
 
   Component.onCompleted: {
-    let tile = tileComponent.createObject(background, { mapLayer: root.currentMapLayer, xPos: 0, yPos: 0})
-    setLayerItem(tile, currentMapLayer, 0, 0)
+    let tile = tileComponent.createObject(background, { mapLayer: 0, xPos: 0, yPos: 0})
+    setLayerItem(tile, 0, 0, 0)
+    updateMap(Qt.point(lon2relCoord(37.617617, currentMapLayer), lat2relCoord(55.755811, currentMapLayer)))
   }
 }
