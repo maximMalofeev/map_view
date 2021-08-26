@@ -4,14 +4,17 @@ import QtQuick.Controls 2.15
 ApplicationWindow {
   id: root
 
-  property int currentMapLayer: 10
+  property url tileServer: "http://a.tile.stamen.com/toner"
+  property int zoom: 0
+  property double centerLattitude: 0
+  property double centerLongitude: 0
   property var mapLayers: ({})
 
-  onCurrentMapLayerChanged: {
+  onZoomChanged: {
     updateMap()
   }
 
-  function setLayerItem(i, l, x, y) {
+  function setTile(i, l, x, y) {
     if (!mapLayers[l]) {
       mapLayers[l] = {}
     }
@@ -23,7 +26,7 @@ ApplicationWindow {
     mapLayers[l][x][y] = i
   }
 
-  function hasLayerItem(l, x, y) {
+  function hasTile(l, x, y) {
     if (mapLayers[l] && mapLayers[l][x] && mapLayers[l][x][y]) {
       return true
     }
@@ -32,7 +35,7 @@ ApplicationWindow {
 
   function updateMap(initialCenter) {
     let center = initialCenter ? initialCenter : Qt.point((flickable.contentX + flickable.width / 2) / background.width, (flickable.contentY + flickable.height / 2) / background.height)
-    let sideLen = Math.pow(2, currentMapLayer) * Math.max(root.width, root.height)
+    let sideLen = Math.pow(2, zoom) * Math.max(root.width, root.height)
     let contentX = Math.max(center.x * sideLen - flickable.width / 2, 0)
     let contentY = Math.max(center.y * sideLen - flickable.height / 2, 0)
 
@@ -41,19 +44,19 @@ ApplicationWindow {
     background.width = sideLen
     background.height = sideLen
 
-    let count = Math.pow(2, currentMapLayer)
-    let firstXTile = Math.floor(contentX / (sideLen / count))
-    let lastXTile = Math.ceil((contentX + flickable.width) / (sideLen / count))
-    let firstYTile = Math.floor(contentY / (sideLen / count))
-    let lastYTile = Math.ceil((contentY + flickable.height) / (sideLen / count))
+    let count = Math.pow(2, zoom)
+    let firstXTile = Math.max(Math.floor(contentX / (sideLen / count)) - 1, 0)
+    let lastXTile = Math.min(Math.ceil((contentX + flickable.width) / (sideLen / count)) + 1, count)
+    let firstYTile = Math.max(Math.floor(contentY / (sideLen / count)) - 1, 0)
+    let lastYTile = Math.min(Math.ceil((contentY + flickable.height) / (sideLen / count)) + 1, count)
     for (let i = firstXTile; i < lastXTile; i++) {
       for (let j = firstYTile; j < lastYTile; j++) {
-        if (hasLayerItem(currentMapLayer, i, j)) {
+        if (hasTile(zoom, i, j)) {
           continue
         }
 
-        let tile = tileComponent.createObject(background, { mapLayer: currentMapLayer, xPos: i, yPos: j })
-        setLayerItem(tile, currentMapLayer, i, j)
+        let tile = tileComponent.createObject(background, { zoom: zoom, xPos: i, yPos: j })
+        setTile(tile, zoom, i, j)
       }
     }
 
@@ -61,9 +64,10 @@ ApplicationWindow {
   }
 
   function clearCache() {
+    // remove layers
     Object.keys(mapLayers).forEach(function(l) {
       l = Number(l)
-      if (l !== currentMapLayer && l !== (currentMapLayer - 1) && l !== (currentMapLayer + 1) && l !== 0) {
+      if (l !== zoom && l !== (zoom - 1) && l !== (zoom + 1) && l !== 0) {
         Object.keys(mapLayers[l]).forEach(function(x) {
           Object.keys(mapLayers[l][x]).forEach(function(y) {
             mapLayers[l][x][y].destroy()
@@ -128,11 +132,11 @@ ApplicationWindow {
     from: 0
     to: 100
     stepSize: 1
-    value: root.currentMapLayer
+    value: root.zoom
     editable: true
 
     onValueChanged: {
-      root.currentMapLayer = value
+      root.zoom = value
     }
   }
 
@@ -141,19 +145,18 @@ ApplicationWindow {
 
     Image {
       id: tile
-      property int mapLayer
+      property int zoom
       property int xPos
       property int yPos
 
-      width: parent.width / Math.pow(2, mapLayer)
-      height: parent.height / Math.pow(2, mapLayer)
+      width: parent.width / Math.pow(2, zoom)
+      height: parent.height / Math.pow(2, zoom)
       x: width * xPos
       y: height * yPos
 
-      z: mapLayer
-      opacity: (mapLayer <= root.currentMapLayer && progress === 1.0) ? 1.0 : 0.0
-      source: "http://a.tile.stamen.com/toner/%1/%2/%3.png".arg(mapLayer).arg(xPos).arg(yPos)
-//      source: "http://172.21.100.146:8008/%1/%2/%3.png".arg(mapLayer).arg(xPos).arg(yPos)
+      z: zoom
+      opacity: (zoom <= root.zoom && progress === 1.0) ? 1.0 : 0.0
+      source: root.tileServer + "/%1/%2/%3.png".arg(zoom).arg(xPos).arg(yPos)
 
       Behavior on opacity {
         NumberAnimation { duration: 500 }
@@ -162,8 +165,9 @@ ApplicationWindow {
   }
 
   Component.onCompleted: {
-    let tile = tileComponent.createObject(background, { mapLayer: 0, xPos: 0, yPos: 0})
-    setLayerItem(tile, 0, 0, 0)
-    updateMap(Qt.point(lon2relCoord(37.617617, currentMapLayer), lat2relCoord(55.755811, currentMapLayer)))
+    let tile = tileComponent.createObject(background, { zoom: 0, xPos: 0, yPos: 0})
+    setTile(tile, 0, 0, 0)
+    updateMap(Qt.point(lon2relCoord(centerLattitude, zoom), lat2relCoord(centerLongitude, zoom)))
+    //    updateMap(Qt.point(lon2relCoord(37.617617, zoom), lat2relCoord(55.755811, zoom)))
   }
 }
